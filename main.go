@@ -14,6 +14,12 @@ func getPath(args []string) string {
 	}
 }
 
+func PrintManifest(m *Manifest) {
+	fmt.Printf("File Count     : %d\n", m.FileCount)
+	fmt.Printf("Directory Count: %d\n", m.DirectoryCount)
+	fmt.Printf("Total Size     : %s\n", PrettySize(m.Size))
+}
+
 func main() {
 	var mainPort uint16
 	gosyncCommand := &cobra.Command{
@@ -25,7 +31,6 @@ func main() {
 	}
 	gosyncCommand.PersistentFlags().Uint16VarP(&mainPort, "port", "p", 32011, "port number to listen or connect to when syncing")
 
-	var hostRW bool
 	var hostHttp bool
 	var httpPort uint16
 	hostCommand := &cobra.Command{
@@ -45,17 +50,17 @@ func main() {
 			fmt.Println("Scanning...")
 			m := GetManifest(getPath(args))
 			fmt.Println("\nHosted Contents:")
-			fmt.Printf("File Count     : %d\n", m.FileCount)
-			fmt.Printf("Directory Count: %d\n", m.DirectoryCount)
-			fmt.Printf("Total Size     : %s\n", PrettySize(m.Size))
+			PrintManifest(m)
 
 			wg.Add(1)
-			HostSync(m, mainPort, hostRW)
+			go func() {
+				HostSync(m, mainPort)
+				wg.Done()
+			}()
 
 			wg.Wait()
 		},
 	}
-	hostCommand.Flags().BoolVarP(&hostRW, "write", "w", false, "allow this host to be written to")
 	hostCommand.Flags().BoolVar(&hostHttp, "http", true, "enable/disable built-in http server while hosting")
 	hostCommand.Flags().Uint16Var(&httpPort, "http-port", 32080, "port number to listen for built-in http server")
 
@@ -65,7 +70,12 @@ func main() {
 		Short: "receives a hosted directory locally",
 		Long:  "receives a hosted directory to a local path",
 		Run: func(cmd *cobra.Command, args []string) {
+			path := getPath(args)
+			if recvHost == "" {
+				recvHost = GetHost()
+			}
 
+			Get(path, recvHost)
 		},
 	}
 	getCommand.Flags().StringVarP(&recvHost, "host", "h", "", "A specific address to receive from")

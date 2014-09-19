@@ -4,6 +4,7 @@ import (
 	"io/ioutil"
 	"log"
 	"math"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"sync"
@@ -49,21 +50,26 @@ func PrettySize(bytes int64) string {
 	panic("byte count out of range")
 }
 
-func GetManifest(path string) *Manifest {
+func GetManifest(root string) *Manifest {
 	var wg sync.WaitGroup
+	var err error
 	pipe := make(chan ManifestNode, 1000)
 	var total uint64
 
 	wg.Add(1)
-	go GetNodes(path, pipe, &wg, &total)
+	go GetNodes(root, pipe, &wg, &total)
 	wg.Wait()
 
 	m := new(Manifest)
-	m.Root = path
+	m.Root = root
 	m.Nodes = make([]ManifestNode, total)
 
 	for i := range m.Nodes {
 		node := <-pipe
+		node.RelativePath, err = filepath.Rel(root, node.RelativePath)
+		if err != nil {
+			log.Fatalln("Failed to process path: ", err)
+		}
 		m.Nodes[i] = node
 		if node.IsDir {
 			m.DirectoryCount++
@@ -77,8 +83,8 @@ func GetManifest(path string) *Manifest {
 	return m
 }
 
-func GetNodes(path string, pipe chan ManifestNode, wg *sync.WaitGroup, total *uint64) {
-	contents, err := ioutil.ReadDir(path)
+func GetNodes(root string, pipe chan ManifestNode, wg *sync.WaitGroup, total *uint64) {
+	contents, err := ioutil.ReadDir(root)
 	if err != nil {
 		wg.Done()
 		log.Print("Could not read dir: ", err, "\n")
@@ -90,7 +96,7 @@ func GetNodes(path string, pipe chan ManifestNode, wg *sync.WaitGroup, total *ui
 		node := ManifestNode{
 			IsDir:        v.IsDir(),
 			Size:         v.Size(),
-			RelativePath: path + "/" + v.Name(),
+			RelativePath: filepath.Join(root, v.Name()),
 		}
 
 		if node.IsDir {
