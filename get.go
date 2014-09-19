@@ -13,6 +13,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -143,7 +144,7 @@ func Get(root string, host string) {
 	reader := bufio.NewReaderSize(w, 1024*1024*32)
 
 	for _, n := range m.Nodes {
-		npath := filepath.Join(root, n.RelativePath)
+		npath := filepath.Join(root, strings.Replace(n.RelativePath, "\\", "/", -1))
 		fmt.Println("\rReceived:", npath, PrettySize(n.Size))
 		w.Print()
 		if n.IsDir {
@@ -153,7 +154,7 @@ func Get(root string, host string) {
 		os.MkdirAll(filepath.Dir(npath), 0777)
 		file, err := os.Create(npath)
 		if err != nil {
-			log.Fatalln("Could not write file: ", err)
+			log.Fatalln("\rCould not write file: ", err)
 		}
 
 		if n.Size == 0 {
@@ -163,7 +164,7 @@ func Get(root string, host string) {
 		_, err = io.CopyN(file, reader, n.Size)
 		file.Close()
 		if err != nil {
-			log.Fatalln("Transfer failed: ", err)
+			log.Fatalln("\rTransfer failed: ", err)
 		}
 	}
 	fmt.Println("\r                                   ")
