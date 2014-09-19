@@ -15,6 +15,30 @@ import (
 	"path/filepath"
 )
 
+func PrintProgress(done int64, total int64) {
+	fmt.Printf("\r%s of %s                           ", PrettySize(done), PrettySize(total))
+}
+
+type Watcher struct {
+	Conn       net.Conn
+	Transfered int64
+	Total      int64
+	Printing   bool
+}
+
+func (w *Watcher) Read(b []byte) (int, error) {
+	n, err := w.Conn.Read(b)
+	w.Transfered += int64(n)
+	if w.Printing {
+		PrintProgress(w.Transfered, w.Total)
+	}
+	return n, err
+}
+func (w *Watcher) Close() error {
+	w.Printing = false
+	return w.Conn.Close()
+}
+
 func GetAddr(entry *mdns.ServiceEntry) net.IP {
 	var addr net.IP
 	if entry.Addr != nil {
@@ -28,7 +52,6 @@ func GetAddr(entry *mdns.ServiceEntry) net.IP {
 }
 
 func GetHost() string {
-	//num := 1
 	fmt.Println("Searching for hosts...")
 	ch := make(chan *mdns.ServiceEntry, 8)
 	mdns.Lookup("_gosync._tcp", ch)
@@ -104,12 +127,18 @@ func Get(root string, host string) {
 
 	io.WriteString(c, "woot\n")
 
+	w := new(Watcher)
+	w.Conn = c
+	w.Printing = true
+	w.Total = m.Size
+	w.Transfered = 0
+
 	//big buffer to cover for small files
-	reader := bufio.NewReaderSize(c, 1024*1024*32)
+	reader := bufio.NewReaderSize(w, 1024*1024*32)
 
 	for _, n := range m.Nodes {
 		npath := filepath.Join(root, n.RelativePath)
-		fmt.Println("Receive: ", npath, n.Size)
+		fmt.Println("\rReceived:", npath, PrettySize(n.Size))
 		if n.IsDir {
 			os.MkdirAll(npath, 0777)
 			continue
@@ -129,6 +158,7 @@ func Get(root string, host string) {
 		if err != nil {
 			log.Fatalln("Transfer failed: ", err)
 		}
-		fmt.Println("Saved " + npath)
 	}
+	fmt.Println("\r                                   ")
+
 }
