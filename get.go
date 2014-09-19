@@ -13,6 +13,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 func PrintProgress(done int64, total int64) {
@@ -24,13 +25,19 @@ type Watcher struct {
 	Transfered int64
 	Total      int64
 	Printing   bool
+	LastPrint  time.Time
+}
+
+func (w *Watcher) Print() {
+	w.LastPrint = time.Now()
+	PrintProgress(w.Transfered, w.Total)
 }
 
 func (w *Watcher) Read(b []byte) (int, error) {
 	n, err := w.Conn.Read(b)
 	w.Transfered += int64(n)
-	if w.Printing {
-		PrintProgress(w.Transfered, w.Total)
+	if w.Printing && time.Since(w.LastPrint) > 100*time.Millisecond {
+		w.Print()
 	}
 	return n, err
 }
@@ -39,16 +46,13 @@ func (w *Watcher) Close() error {
 	return w.Conn.Close()
 }
 
-func GetAddr(entry *mdns.ServiceEntry) net.IP {
-	var addr net.IP
-	if entry.Addr != nil {
-		addr = entry.Addr
-	} else if entry.AddrV4 != nil {
-		addr = entry.AddrV4
+func GetAddr(entry *mdns.ServiceEntry) string {
+	if entry.AddrV4 != nil {
+		return entry.AddrV4.String()
 	} else if entry.AddrV6 != nil {
-		addr = entry.AddrV6
+		return "[" + entry.AddrV6.String() + "]"
 	}
-	return addr
+	panic("Unknown address")
 }
 
 func GetHost() string {
@@ -85,10 +89,10 @@ func GetHost() string {
 
 func Get(root string, host string) {
 	c, err := net.Dial("tcp", host)
-	defer c.Close()
 	if err != nil {
 		log.Fatalln("Could not connect to host: ", err)
 	}
+	defer c.Close()
 
 	_, err = io.WriteString(c, "hi\n")
 	if err != nil {
@@ -139,6 +143,7 @@ func Get(root string, host string) {
 	for _, n := range m.Nodes {
 		npath := filepath.Join(root, n.RelativePath)
 		fmt.Println("\rReceived:", npath, PrettySize(n.Size))
+		w.Print()
 		if n.IsDir {
 			os.MkdirAll(npath, 0777)
 			continue
