@@ -47,10 +47,12 @@ func (w *Watcher) Close() error {
 }
 
 func GetAddr(entry *mdns.ServiceEntry) string {
+	//if entry.AddrV6 != nil {
+	//	return "[" + entry.AddrV6.String() + "]"
+	//}
+
 	if entry.AddrV4 != nil {
 		return entry.AddrV4.String()
-	} else if entry.AddrV6 != nil {
-		return "[" + entry.AddrV6.String() + "]"
 	}
 	panic("Unknown address")
 }
