@@ -21,7 +21,7 @@ var (
 	recvHost     = recvCommand.Flag("host", "Specify a direct address to connect to.").String()
 )
 
-func StartRecv() {
+func StartHost() {
 	var wg sync.WaitGroup
 	if *hostHttp {
 		wg.Add(1)
@@ -38,7 +38,7 @@ func StartRecv() {
 
 	wg.Add(1)
 	go func() {
-		HostSync(m, uint16(*mainPort))
+		HostSync(m.MakeSync(), uint16(*mainPort))
 		wg.Done()
 	}()
 

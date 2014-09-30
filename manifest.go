@@ -1,5 +1,9 @@
 package main
 
+import (
+	"fmt"
+)
+
 type Manifest struct {
 	Nodes          []ManifestNode
 	Root           string
@@ -59,29 +63,30 @@ func (s *SyncManifest) Print() {
 }
 
 func (m *Manifest) MakeSync() *SyncManifest {
-	man := new(SyncManifest)
-	man.Files = make([]File, m.FileCount)
-	man.Directories = make([]string, m.DirectoryCount)
-	man.Links = make([]Link, m.LinkCount)
+	s := new(SyncManifest)
+	s.Files = make([]File, m.FileCount)
+	s.Directories = make([]string, m.DirectoryCount)
+	s.Links = make([]Link, m.LinkCount)
 	f, d, l := 0, 0, 0
 	for _, v := range m.Nodes {
 		if v.IsDir {
-			man.Directories[d] = v.RelativePath
+			s.Directories[d] = v.RelativePath
 			d++
 		} else if v.IsLink {
-			man.Links[l] = Link{
+			s.Links[l] = Link{
 				OldName: v.RelativePath,
 				NewName: v.LinkPath,
 			}
 			l++
 		} else {
-			man.Files[f] = File{
+			s.Files[f] = File{
 				Name: v.RelativePath,
 				Size: v.Size,
 			}
 			f++
 		}
 	}
-	man.Size = m.Size
-	return man
+	s.Size = m.Size
+	s.Root = m.Root
+	return s
 }

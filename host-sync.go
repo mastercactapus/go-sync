@@ -16,11 +16,9 @@ import (
 	"strconv"
 )
 
-func SendSync(m *Manifest, c net.Conn, mEncoded []byte) {
-	fmt.Println("send!")
+func SendSync(s *SyncManifest, c net.Conn, mEncoded []byte) {
 	defer func() {
 		c.Close()
-		fmt.Println("closed")
 	}()
 
 	buf := make([]byte, 8)
@@ -58,12 +56,13 @@ func SendSync(m *Manifest, c net.Conn, mEncoded []byte) {
 	//while the network is working
 	writer := bufio.NewWriterSize(c, *bufferSize)
 
-	for _, v := range m.Nodes {
-		if v.IsDir {
+	for _, v := range s.Files {
+		if v.Size == 0 {
 			continue
 		}
-		file, err := os.Open(filepath.Join(m.Root, v.RelativePath))
+		file, err := os.Open(filepath.Join(s.Root, v.Name))
 		if err != nil {
+			log.Println(err)
 			continue
 		}
 		_, err = io.Copy(writer, file)
@@ -79,7 +78,7 @@ func SendSync(m *Manifest, c net.Conn, mEncoded []byte) {
 
 }
 
-func HostSync(m *Manifest, port uint16) {
+func HostSync(s *SyncManifest, port uint16) {
 	var service *mdns.MDNSService
 	var server *mdns.Server
 
@@ -120,11 +119,9 @@ listen:
 		log.Fatalln("Could not create compression stream: ", err)
 	}
 
-	manifest := m.MakeSync()
-
 	fmt.Print("Compressing manifest...")
 	enc := gob.NewEncoder(w)
-	enc.Encode(manifest)
+	enc.Encode(s)
 	w.Flush()
 	w.Close()
 	fmt.Printf("\r%30s", "")
@@ -140,6 +137,6 @@ listen:
 			log.Fatalln("Failed to accept connection: ", err)
 		}
 
-		go SendSync(m, c, manifestEncoded)
+		go SendSync(s, c, manifestEncoded)
 	}
 }
