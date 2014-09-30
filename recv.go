@@ -8,16 +8,17 @@ import (
 	"encoding/gob"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"log"
 	"net"
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
+	"sync"
 )
 
 func RecvManifest(c io.ReadWriter) *SyncManifest {
-
+	var err error
 	_, err = io.WriteString(c, "hi\n")
 	if err != nil {
 		log.Fatalln("Failed to communicate with host: ", err)
@@ -51,7 +52,11 @@ func RecvManifest(c io.ReadWriter) *SyncManifest {
 	return s
 }
 
-func Get(root string, host string) {
+func WriteFile(path string, data []byte) {
+	ioutil.WriteFile(path, data, 0777)
+}
+
+func Recv(root string, host string) {
 	c, err := net.Dial("tcp", host)
 	if err != nil {
 		log.Fatalln("Could not connect to host: ", err)
@@ -64,9 +69,18 @@ func Get(root string, host string) {
 	fmt.Println("\nPress ENTER to proceed.")
 	fmt.Scanln()
 
+	for _, v := range m.Directories {
+		npath := filepath.Join(root, strings.Replace(v, "\\", "/", -1))
+		os.MkdirAll(npath, 0777)
+	}
+	for _, v := range m.Links {
+		npath := filepath.Join(root, strings.Replace(v.NewName, "\\", "/", -1))
+		os.Link(v.OldName, npath)
+	}
+
 	io.WriteString(c, "woot\n")
 
-	w := new(Watcher)
+	w := new(TransferWatcher)
 	w.Conn = c
 	w.Printing = true
 	w.Total = m.Size
@@ -75,18 +89,32 @@ func Get(root string, host string) {
 	//big buffer to cover for small files
 	reader := bufio.NewReaderSize(w, *bufferSize)
 
-	for _, n := range m.Nodes {
-		npath := filepath.Join(root, strings.Replace(n.RelativePath, "\\", "/", -1))
+	wg := new(sync.WaitGroup)
+
+	maxSize := int64(*bufferSize / 4)
+
+	for _, n := range m.Files {
+		npath := filepath.Join(root, strings.Replace(n.Name, "\\", "/", -1))
 		fmt.Println("\rReceived:", npath, PrettySize(n.Size))
 		w.Print()
-		if n.IsDir {
-			os.MkdirAll(npath, 0777)
-			continue
-		} else if n.IsLink {
-			os.Link(n.LinkPath, npath)
+
+		if n.Size < maxSize {
+			buff := make([]byte, n.Size)
+			_, err = io.ReadFull(reader, buff)
+			if err != nil {
+				log.Fatalln("\rTransfer failed: ", err)
+			}
+			wg.Add(1)
+			go func() {
+				err := ioutil.WriteFile(npath, buff, 0666)
+				if err != nil {
+					log.Fatalln("\rWrite failed: ", err)
+				}
+				wg.Done()
+			}()
 			continue
 		}
-		os.MkdirAll(filepath.Dir(npath), 0777)
+
 		file, err := os.Create(npath)
 		if err != nil {
 			log.Fatalln("\rCould not write file: ", err)
@@ -102,6 +130,6 @@ func Get(root string, host string) {
 			log.Fatalln("\rTransfer failed: ", err)
 		}
 	}
+	wg.Wait()
 	fmt.Println("\r                                   ")
-
 }
