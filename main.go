@@ -2,84 +2,67 @@ package main
 
 import (
 	"fmt"
-	"github.com/spf13/cobra"
+	"github.com/alecthomas/kingpin"
+	"os"
+	"runtime"
 	"sync"
 )
 
-func getPath(args []string) string {
-	if len(args) > 0 {
-		return args[0]
-	} else {
-		return "."
+var (
+	app          = kingpin.New("gosync", "A tool to sync a directory over a high-speed network.")
+	mainPort     = app.Flag("port", "port number to listen or connect to when syncing").Short('p').Default("32011").Uint64()
+	bufferSize   = app.Flag("buffer", "The size (in kB) of the buffer for sending/receiving.").Short('b').Default("131072").Int()
+	hostCommand  = app.Command("host", "Make a directory available on the network.")
+	hostPath     = hostCommand.Arg("path", "The directory to host.").Default(".").ExistingDir()
+	hostHttp     = hostCommand.Flag("http", "Host the directory via http in addition to gosync.").Default("true").Bool()
+	hostHttpAddr = hostCommand.Flag("http-addr", "The address to start the http server on").Default(":32080").String()
+	recvCommand  = app.Command("recv", "Sync a directory from the network, locally.")
+	recvPath     = recvCommand.Arg("path", "The directory to sync into.").Default(".").File()
+	recvHost     = recvCommand.Flag("host", "Specify a direct address to connect to.").String()
+)
+
+func StartRecv() {
+	var wg sync.WaitGroup
+	if *hostHttp {
+		wg.Add(1)
+		go func() {
+			HostHTTP(*hostPath, *hostHttpAddr)
+			wg.Done()
+		}()
 	}
+
+	fmt.Printf("Scanning...")
+	m := GetManifest(*hostPath)
+	fmt.Printf("\r%-20s\n", "Found:")
+	m.Print()
+
+	wg.Add(1)
+	go func() {
+		HostSync(m, uint16(*mainPort))
+		wg.Done()
+	}()
+
+	wg.Wait()
 }
 
-func PrintManifest(m *Manifest) {
-	fmt.Printf("File Count     : %d\n", m.FileCount)
-	fmt.Printf("Directory Count: %d\n", m.DirectoryCount)
-	fmt.Printf("Total Size     : %s\n", PrettySize(m.Size))
+func StartRecv() {
+	var host string = *recvHost
+	if host == "" {
+		host = GetHost()
+	}
+
+	Recv(recvPath.Name(), host)
 }
 
 func main() {
-	var mainPort uint16
-	gosyncCommand := &cobra.Command{
-		Use:   "gosync",
-		Short: "gosync is a tool to sync a directory over a high-speed network",
-		Run: func(cmd *cobra.Command, args []string) {
-			cmd.Usage()
-		},
+	runtime.GOMAXPROCS(runtime.NumCPU())
+	switch kingpin.MustParse(app.Parse(os.Args[1:])) {
+	case "host":
+		StartHost()
+	case "recv":
+		StartRecv()
+	default:
+		kingpin.Usage()
 	}
-	gosyncCommand.PersistentFlags().Uint16VarP(&mainPort, "port", "p", 32011, "port number to listen or connect to when syncing")
 
-	var hostHttp bool
-	var httpPort uint16
-	hostCommand := &cobra.Command{
-		Use:   "host [path]",
-		Short: "host a directory on the network",
-		Long:  "hosts a directory on the network, broadcasting it's existence.",
-		Run: func(cmd *cobra.Command, args []string) {
-			var wg sync.WaitGroup
-			if hostHttp {
-				wg.Add(1)
-				go func() {
-					HostHTTP(getPath(args), httpPort)
-					wg.Done()
-				}()
-			}
-
-			fmt.Println("Scanning...")
-			m := GetManifest(getPath(args))
-			fmt.Println("\nHosted Contents:")
-			PrintManifest(m)
-
-			wg.Add(1)
-			go func() {
-				HostSync(m, mainPort)
-				wg.Done()
-			}()
-
-			wg.Wait()
-		},
-	}
-	hostCommand.Flags().BoolVar(&hostHttp, "http", true, "enable/disable built-in http server while hosting")
-	hostCommand.Flags().Uint16Var(&httpPort, "http-port", 32080, "port number to listen for built-in http server")
-
-	var recvHost string
-	getCommand := &cobra.Command{
-		Use:   "get [path]",
-		Short: "receives a hosted directory locally",
-		Long:  "receives a hosted directory to a local path",
-		Run: func(cmd *cobra.Command, args []string) {
-			path := getPath(args)
-			if recvHost == "" {
-				recvHost = GetHost()
-			}
-
-			Get(path, recvHost)
-		},
-	}
-	getCommand.Flags().StringVarP(&recvHost, "host", "h", "", "A specific address to receive from")
-
-	gosyncCommand.AddCommand(hostCommand, getCommand)
-	gosyncCommand.Execute()
 }
