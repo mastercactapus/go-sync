@@ -17,7 +17,11 @@ import (
 )
 
 func SendSync(m *Manifest, c net.Conn, mEncoded []byte) {
-	defer c.Close()
+	fmt.Println("send!")
+	defer func() {
+		c.Close()
+		fmt.Println("closed")
+	}()
 
 	buf := make([]byte, 8)
 
@@ -52,7 +56,7 @@ func SendSync(m *Manifest, c net.Conn, mEncoded []byte) {
 
 	//we want a big buffer, so we can shove small files together
 	//while the network is working
-	writer := bufio.NewWriterSize(c, 1024*1024*32)
+	writer := bufio.NewWriterSize(c, *bufferSize)
 
 	for _, v := range m.Nodes {
 		if v.IsDir {
@@ -66,6 +70,7 @@ func SendSync(m *Manifest, c net.Conn, mEncoded []byte) {
 		file.Close()
 		if err != nil {
 			//cancel process
+			log.Println(err)
 			return
 		}
 	}
@@ -115,11 +120,14 @@ listen:
 		log.Fatalln("Could not create compression stream: ", err)
 	}
 
-	fmt.Println("Compressing manifest...")
+	manifest := m.MakeSync()
+
+	fmt.Print("Compressing manifest...")
 	enc := gob.NewEncoder(w)
-	enc.Encode(m)
+	enc.Encode(manifest)
 	w.Flush()
 	w.Close()
+	fmt.Printf("\r%30s", "")
 
 	manifestEncoded := buf.Bytes()
 	buf.Reset()

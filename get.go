@@ -7,7 +7,6 @@ import (
 	"encoding/binary"
 	"encoding/gob"
 	"fmt"
-	"github.com/armon/mdns"
 	"io"
 	"log"
 	"net"
@@ -17,85 +16,7 @@ import (
 	"time"
 )
 
-func PrintProgress(done int64, total int64) {
-	fmt.Printf("\r%s of %s                           ", PrettySize(done), PrettySize(total))
-}
-
-type Watcher struct {
-	Conn       net.Conn
-	Transfered int64
-	Total      int64
-	Printing   bool
-	LastPrint  time.Time
-}
-
-func (w *Watcher) Print() {
-	w.LastPrint = time.Now()
-	PrintProgress(w.Transfered, w.Total)
-}
-
-func (w *Watcher) Read(b []byte) (int, error) {
-	n, err := w.Conn.Read(b)
-	w.Transfered += int64(n)
-	if w.Printing && time.Since(w.LastPrint) > 100*time.Millisecond {
-		w.Print()
-	}
-	return n, err
-}
-func (w *Watcher) Close() error {
-	w.Printing = false
-	return w.Conn.Close()
-}
-
-func GetAddr(entry *mdns.ServiceEntry) string {
-	//if entry.AddrV6 != nil {
-	//	return "[" + entry.AddrV6.String() + "]"
-	//}
-
-	if entry.AddrV4 != nil {
-		return entry.AddrV4.String()
-	}
-	panic("Unknown address")
-}
-
-func GetHost() string {
-	fmt.Println("Searching for hosts...")
-	ch := make(chan *mdns.ServiceEntry, 8)
-	mdns.Lookup("_gosync._tcp", ch)
-	close(ch)
-	if len(ch) == 0 {
-		log.Fatalln("No hosts available, specify manually or try again")
-	}
-	entries := make([]mdns.ServiceEntry, len(ch))
-	i := 1
-	for entry := range ch {
-		addr := GetAddr(entry)
-		fmt.Printf("[%d] << %s >> %s:%d\n", i, entry.Host, addr, entry.Port)
-		entries[i-1] = *entry
-		i++
-	}
-	i = 0
-	first := true
-	for i < 1 || i > len(entries) {
-		if !first {
-			fmt.Println("Invalid, try again")
-		}
-		first = false
-		fmt.Printf("Selection: ")
-		fmt.Scanf("%d", &i)
-	}
-
-	fmt.Println()
-
-	return fmt.Sprintf("%s:%d", GetAddr(&entries[i-1]), entries[i-1].Port)
-}
-
-func Get(root string, host string) {
-	c, err := net.Dial("tcp", host)
-	if err != nil {
-		log.Fatalln("Could not connect to host: ", err)
-	}
-	defer c.Close()
+func RecvManifest(c io.ReadWriter) *SyncManifest {
 
 	_, err = io.WriteString(c, "hi\n")
 	if err != nil {
@@ -121,14 +42,25 @@ func Get(root string, host string) {
 	}
 	dec := gob.NewDecoder(gread)
 
-	m := new(Manifest)
+	s := new(SyncManifest)
 
-	err = dec.Decode(&m)
+	err = dec.Decode(&s)
 	if err != nil {
 		log.Fatalln("Failed to decode manifest: ", err)
 	}
+	return s
+}
 
-	PrintManifest(m)
+func Get(root string, host string) {
+	c, err := net.Dial("tcp", host)
+	if err != nil {
+		log.Fatalln("Could not connect to host: ", err)
+	}
+	defer c.Close()
+
+	m := RecvManifest(c)
+
+	m.Print()
 	fmt.Println("\nPress ENTER to proceed.")
 	fmt.Scanln()
 
@@ -141,7 +73,7 @@ func Get(root string, host string) {
 	w.Transfered = 0
 
 	//big buffer to cover for small files
-	reader := bufio.NewReaderSize(w, 1024*1024*32)
+	reader := bufio.NewReaderSize(w, *bufferSize)
 
 	for _, n := range m.Nodes {
 		npath := filepath.Join(root, strings.Replace(n.RelativePath, "\\", "/", -1))
@@ -149,6 +81,9 @@ func Get(root string, host string) {
 		w.Print()
 		if n.IsDir {
 			os.MkdirAll(npath, 0777)
+			continue
+		} else if n.IsLink {
+			os.Link(n.LinkPath, npath)
 			continue
 		}
 		os.MkdirAll(filepath.Dir(npath), 0777)

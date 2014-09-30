@@ -3,9 +3,8 @@ package main
 import (
 	"log"
 	"net/http"
-	"strconv"
 )
 
-func HostHTTP(path string, port uint16) {
-	log.Fatal(http.ListenAndServe(":"+strconv.Itoa(int(port)), http.FileServer(http.Dir(path))))
+func HostHTTP(path string, addr string) {
+	log.Fatal(http.ListenAndServe(addr, http.FileServer(http.Dir(path))))
 }

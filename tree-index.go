@@ -4,6 +4,7 @@ import (
 	"io/ioutil"
 	"log"
 	"math"
+	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -12,32 +13,6 @@ import (
 )
 
 var Labels = [...]string{"B", "KiB", "MiB", "GiB", "TiB"}
-
-type ManifestNode struct {
-	RelativePath string
-	IsDir        bool
-	Size         int64
-}
-
-type Manifest struct {
-	Nodes          []ManifestNode
-	Root           string
-	FileCount      int
-	DirectoryCount int
-	Size           int64
-}
-
-type ByPath []ManifestNode
-
-func (n ByPath) Len() int {
-	return len(n)
-}
-func (n ByPath) Swap(i, j int) {
-	n[i], n[j] = n[j], n[i]
-}
-func (n ByPath) Less(i, j int) bool {
-	return n[i].RelativePath < n[j].RelativePath
-}
 
 func PrettySize(bytes int64) string {
 	fbyte := float64(bytes)
@@ -73,6 +48,8 @@ func GetManifest(root string) *Manifest {
 		m.Nodes[i] = node
 		if node.IsDir {
 			m.DirectoryCount++
+		} else if node.IsLink {
+			m.LinkCount++
 		} else {
 			m.FileCount++
 			m.Size += node.Size
@@ -93,15 +70,30 @@ func GetNodes(root string, pipe chan ManifestNode, wg *sync.WaitGroup, total *ui
 	atomic.AddUint64(total, uint64(len(contents)))
 	nodes := make([]ManifestNode, len(contents))
 	for k, v := range contents {
+		mode := v.Mode()
+		var isLink bool
+		var linkPath string
+		var path string = filepath.Join(root, v.Name())
+		if !mode.IsRegular() && !mode.IsDir() {
+			isLink = true
+			linkPath, err = os.Readlink(path)
+			if err != nil {
+				log.Println("Failed to read: ", err)
+				continue
+			}
+		}
+
 		node := ManifestNode{
 			IsDir:        v.IsDir(),
+			IsLink:       isLink,
+			LinkPath:     linkPath,
 			Size:         v.Size(),
-			RelativePath: filepath.Join(root, v.Name()),
+			RelativePath: path,
 		}
 
 		if node.IsDir {
 			wg.Add(1)
-			go GetNodes(node.RelativePath, pipe, wg, total)
+			go GetNodes(path, pipe, wg, total)
 		}
 
 		nodes[k] = node
