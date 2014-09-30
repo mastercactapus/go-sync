@@ -60,7 +60,9 @@ func SendSync(s *SyncManifest, c net.Conn, mEncoded []byte) {
 		if v.Size == 0 {
 			continue
 		}
-		file, err := os.Open(filepath.Join(s.Root, v.Name))
+		filename := filepath.Join(s.Root, v.Name)
+
+		file, err := os.Open(filename)
 		if err != nil {
 			log.Println(err)
 			continue
